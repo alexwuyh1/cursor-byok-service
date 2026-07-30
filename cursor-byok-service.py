@@ -194,11 +194,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _is_localhost(self):
+        """True if the request originated locally (not via the public tunnel)."""
+        host = self.headers.get("Host", "")
+        return host.startswith("127.0.0.1") or host.startswith("localhost")
+
     def do_GET(self):
         p = self.path.split("?")[0]
         if p == "/admin":
+            if not self._is_localhost():
+                self._json(403, {"error": "admin console is local-only"})
+                return
             self._html(_ADMIN_HTML)
         elif p == "/admin/api/status":
+            if not self._is_localhost():
+                self._json(403, {"error": "admin API is local-only"})
+                return
             with _stats_lock:
                 reqs = list(_stats["requests"][-20:])
                 pid = _stats["tunnel_pid"]
@@ -210,6 +221,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "requests": reqs,
             })
         elif p == "/admin/api/config":
+            if not self._is_localhost():
+                self._json(403, {"error": "admin API is local-only"})
+                return
             safe = dict(CFG)
             self._json(200, safe)
         elif p == "/v1/models":
@@ -225,6 +239,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # Admin: save config
         if p == "/admin/api/config":
+            if not self._is_localhost():
+                self._json(403, {"error": "admin API is local-only"})
+                return
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length) if length else b""
             try:
@@ -241,6 +258,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # Admin: restart
         if p == "/admin/api/restart":
+            if not self._is_localhost():
+                self._json(403, {"error": "admin API is local-only"})
+                return
             self._json(200, {"status": "restarting"})
             threading.Timer(0.5, _shutdown.set).start()
             return
