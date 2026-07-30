@@ -157,175 +157,18 @@ def _resolve_model(alias):
                 entry.get("api_key", CFG["bailian_api_key"]))
     return alias, CFG["bailian_base_url"], CFG["bailian_api_key"]
 
-
 # ---------------------------------------------------------------------------
-# Admin console HTML
+# Admin console — loaded from admin.html at startup
 # ---------------------------------------------------------------------------
 
-_ADMIN_HTML = r"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BYOK Console</title>
-<style>
-:root{--bg:#1a1a1a;--surface:#242424;--border:#333;--text:#e0e0e0;--muted:#888;--accent:#4a9eff;--success:#4caf50;--danger:#f44336;--warn:#f39c12;--radius:6px;--mono:'SF Mono',Menlo,Consolas,monospace}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font:14px/1.5 -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--text);padding:20px;max-width:920px;margin:0 auto}
-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--border)}
-header h1{font-size:18px;font-weight:600}
-.badges{display:flex;gap:14px;flex-wrap:wrap}
-.badge{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
-.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
-.dot-ok{background:var(--success)}.dot-err{background:var(--danger)}.dot-warn{background:var(--warn)}
-section{margin-bottom:28px}
-h2{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
-label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
-input,select{width:100%;padding:7px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:13px var(--mono);outline:none}
-input:focus{border-color:var(--accent)}
-.btn{display:inline-block;padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:500}
-.btn:hover{opacity:.85}.btn-danger{background:var(--danger)}.btn-sm{padding:4px 10px;font-size:11px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.actions{display:flex;gap:8px;margin-top:14px}
-.muted{color:var(--muted);font-size:12px}
-.model-row{display:grid;grid-template-columns:1fr 1fr 1.4fr 1.4fr auto;gap:6px;align-items:end;margin-bottom:8px}
-.model-row input{font-size:12px}
-.logs{font:12px var(--mono);color:var(--muted);max-height:220px;overflow-y:auto}
-.le{padding:2px 0}.le .t{color:var(--muted)}.le .ok{color:var(--success)}.le .er{color:var(--danger)}
-table{width:100%;border-collapse:collapse;font-size:13px}
-th,td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)}
-th{color:var(--muted);font-weight:500;font-size:12px}
-td code{font-family:var(--mono);font-size:12px}
-#overlay{text-align:center;padding:60px;color:var(--muted);font-size:16px}
-</style>
-</head>
-<body>
-<header>
-  <h1>BYOK Console</h1>
-  <div class="badges" id="badges"></div>
-</header>
-<section>
-  <h2>Models</h2>
-  <div class="card">
-    <div id="model-rows"></div>
-    <div class="actions">
-      <button class="btn btn-sm" onclick="addModelRow()">+ Add Model</button>
-    </div>
-  </div>
-</section>
-<section>
-  <h2>Global Config</h2>
-  <div class="card">
-    <div class="grid2">
-      <div><label>Default Base URL</label><input id="cfg-base-url" placeholder="https://..."></div>
-      <div><label>Public Hostname</label><input id="cfg-hostname" placeholder="cursor.domain.com"></div>
-      <div><label>Default API Key</label><input id="cfg-api-key" type="password" placeholder="sk-..."></div>
-      <div><label>Tunnel Name</label><input id="cfg-tunnel-name" placeholder="bailian-proxy"></div>
-      <div><label>Listen Port</label><input id="cfg-port" type="number" value="8787"></div>
-      <div><label>Run Tunnel</label><select id="cfg-run-tunnel"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
-    </div>
-    <div class="actions">
-      <button class="btn" onclick="saveRestart()">Save &amp; Restart</button>
-      <button class="btn btn-danger" onclick="restartOnly()">Restart Only</button>
-    </div>
-  </div>
-</section>
-<section>
-  <h2>Recent Requests</h2>
-  <div class="card"><div class="logs" id="logs">No requests yet.</div></div>
-</section>
-<script>
-let origCfg={};
-async function api(p,o){const r=await fetch(p,o);return r.json();}
-async function load(){
-  const[s,c]=await Promise.all([api('/admin/api/status'),api('/admin/api/config')]);
-  renderBadges(s);renderConfig(c);renderModels(c.model_map||{});renderLogs(s.requests||[]);
-}
-function renderBadges(s){
-  const tp=s.tunnel_pid&&s.tunnel_pid>0;
-  const up=s.uptime?fmtUptime(s.uptime):'--';
-  document.getElementById('badges').innerHTML=
-    `<span class="badge"><span class="dot dot-ok"></span>Proxy</span>`+
-    `<span class="badge"><span class="dot ${tp?'dot-ok':'dot-err'}"></span>Tunnel ${tp?'OK':'Down'}</span>`+
-    `<span class="badge"><span class="dot dot-warn"></span>${up}</span>`+
-    `<span class="badge"><span class="dot dot-ok"></span>${s.model_count||0} Models</span>`;
-}
-function fmtUptime(s){
-  if(s<60)return Math.round(s)+'s';
-  if(s<3600)return Math.round(s/60)+'m';
-  return (s/3600).toFixed(1)+'h';
-}
-function renderConfig(c){
-  origCfg=c;
-  val('cfg-base-url',c.bailian_base_url);val('cfg-hostname',c.hostname);
-  val('cfg-api-key',c.bailian_api_key);val('cfg-tunnel-name',c.tunnel_name);
-  val('cfg-port',c.listen_port||8787);
-  document.getElementById('cfg-run-tunnel').value=String(c.run_tunnel);
-}
-function val(id,v){document.getElementById(id).value=v||'';}
-function renderModels(mm){
-  const c=document.getElementById('model-rows');c.innerHTML='';
-  for(const[a,e]of Object.entries(mm)){
-    if(typeof e==='string')addModelRow(a,e,'','');
-    else addModelRow(a,e.model_id||'',e.base_url||'',e.api_key||'');
-  }
-}
-function addModelRow(alias='',mid='',bu='',ak=''){
-  const c=document.getElementById('model-rows');
-  const r=document.createElement('div');r.className='model-row';
-  r.innerHTML=`<input placeholder="Alias" value="${esc(alias)}">`+
-    `<input placeholder="Model ID" value="${esc(mid)}">`+
-    `<input placeholder="Base URL (blank=default)" value="${esc(bu)}">`+
-    `<input placeholder="API Key (blank=default)" type="password" value="${esc(ak)}">`+
-    `<button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">Delete</button>`;
-  c.appendChild(r);
-}
-function esc(s){return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;');}
-function collectConfig(){
-  const mm={};
-  document.querySelectorAll('.model-row').forEach(r=>{
-    const i=r.querySelectorAll('input');
-    const a=i[0].value.trim();if(!a)return;
-    const m=i[1].value.trim(),bu=i[2].value.trim(),ak=i[3].value.trim();
-    if(bu||ak){const e={model_id:m};if(bu)e.base_url=bu;if(ak)e.api_key=ak;mm[a]=e;}
-    else mm[a]=m;
-  });
-  return{model_map:mm,
-    bailian_base_url:document.getElementById('cfg-base-url').value,
-    hostname:document.getElementById('cfg-hostname').value,
-    bailian_api_key:document.getElementById('cfg-api-key').value,
-    tunnel_name:document.getElementById('cfg-tunnel-name').value,
-    listen_port:parseInt(document.getElementById('cfg-port').value)||8787,
-    run_tunnel:document.getElementById('cfg-run-tunnel').value==='true',
-    cloudflared_bin:origCfg.cloudflared_bin||'',
-    cf_credentials_dir:origCfg.cf_credentials_dir||'',
-  };
-}
-async function saveRestart(){
-  await api('/admin/api/config',{method:'POST',body:JSON.stringify(collectConfig()),headers:{'Content-Type':'application/json'}});
-  await api('/admin/api/restart',{method:'POST'});
-  document.body.innerHTML='<div id="overlay">Saving &amp; restarting...<br>launchd will bring the service back in a few seconds.</div>';
-  setTimeout(()=>location.reload(),5000);
-}
-async function restartOnly(){
-  await api('/admin/api/restart',{method:'POST'});
-  document.body.innerHTML='<div id="overlay">Restarting...</div>';
-  setTimeout(()=>location.reload(),5000);
-}
-function renderLogs(r){
-  const e=document.getElementById('logs');
-  if(!r.length){e.textContent='No requests yet.';return;}
-  e.innerHTML=r.reverse().map(x=>
-    `<div class="le"><span class="t">${x.time}</span> `+
-    `<span class="${x.status===200?'ok':'er'}">${x.status}</span> `+
-    `${esc(x.model)} <span class="muted">${x.latency_ms}ms</span></div>`
-  ).join('');
-}
-load();setInterval(load,5000);
-</script>
-</body>
-</html>"""
+_ADMIN_HTML_PATH = os.path.join(_DIR, "admin.html")
+_ADMIN_HTML = ""
+if os.path.exists(_ADMIN_HTML_PATH):
+    with open(_ADMIN_HTML_PATH, encoding="utf-8") as _f:
+        _ADMIN_HTML = _f.read()
+else:
+    print("[WARN] admin.html not found, console disabled", file=sys.stderr)
+
 
 
 # ---------------------------------------------------------------------------
