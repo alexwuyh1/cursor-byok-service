@@ -1,7 +1,12 @@
 {
   "model_map": {
     "bl-llm-1": "glm-5.2",
-    "bl-llm-2": "kimi-k2.7-code"
+    "bl-llm-2": "kimi-k2.7-code",
+    "bl-llm-3": {
+      "model_id": "deepseek-chat",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-another-provider-key"
+    }
   },
   "bailian_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
   "bailian_api_key": "sk-your-bailian-key-here",

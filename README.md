@@ -93,6 +93,7 @@ launchctl load ~/Library/LaunchAgents/com.cursor.byok.service.plist
 
 - **模型别名不能包含内置模型名片段**：`bailian-glm-5.2` 不行（包含 `glm-5.2`），`bl-llm-1` 可以。Cursor 做子串模糊匹配，加前缀没用。
 - **localhost 不可达**：BYOK 请求从 Cursor 云端后端发出，必须用公网隧道。
+- **多 provider 支持**：`model_map` 值为对象时可指定独立 `base_url` 和 `api_key`，实现一个代理服务路由到多个 provider。
 - **用 Homebrew Python**：`/opt/homebrew/bin/python3`，不要用 `/usr/bin/python3`（Xcode 沙箱版无权访问某些目录）。
 - **config.json 不提交 git**：里面有 API key，已加入 `.gitignore`，用 `config.example.json` 做模板。
 
@@ -115,3 +116,24 @@ cursor-byok-service/
 ## License
 
 MIT
+- `bl-llm-3`，用对象格式指定独立的 `base_url` 和 `api_key`，走不同 provider
+
+`model_map` 的值支持两种格式：
+
+**字符串**（用全局默认 base_url 和 api_key）：
+```json
+"bl-llm-1": "glm-5.2"
+```
+
+**对象**（指定独立 provider）：
+```json
+"bl-llm-3": {
+  "model_id": "deepseek-chat",
+  "base_url": "https://api.deepseek.com/v1",
+  "api_key": "sk-another-key"
+}
+```
+
+对象格式中 `base_url` 和 `api_key` 可省略，省略时回退到全局默认值。
+
+## 关键注意事项

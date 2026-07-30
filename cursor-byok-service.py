@@ -142,6 +142,27 @@ def _generate_cf_config():
 # HTTP proxy handler
 # ---------------------------------------------------------------------------
 
+def _resolve_model(alias):
+    """Resolve a model alias to (model_id, base_url, api_key).
+
+    model_map values can be:
+      - string:  "bl-llm-1": "glm-5.2"          -> uses global defaults
+      - object:  "bl-llm-3": {"model_id": "...", "base_url": "...", "api_key": "..."}
+    """
+    entry = CFG["model_map"].get(alias)
+    if entry is None:
+        # Not in map — pass through as-is, use global defaults
+        return alias, CFG["bailian_base_url"], CFG["bailian_api_key"]
+    if isinstance(entry, str):
+        return entry, CFG["bailian_base_url"], CFG["bailian_api_key"]
+    if isinstance(entry, dict):
+        model_id = entry.get("model_id", alias)
+        base_url = entry.get("base_url", CFG["bailian_base_url"])
+        api_key = entry.get("api_key", CFG["bailian_api_key"])
+        return model_id, base_url, api_key
+    return alias, CFG["bailian_base_url"], CFG["bailian_api_key"]
+
+
 class ProxyHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -177,16 +198,14 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             return
 
         original = body.get("model", "")
-        resolved = CFG["model_map"].get(original, original)
-        if resolved != original:
-            print(f"[INFO] model rewrite: {original} -> {resolved}", flush=True)
-        body["model"] = resolved
+        model_id, base_url, api_key = _resolve_model(original)
+        body["model"] = model_id
         is_stream = body.get("stream", False)
 
-        parsed = urlparse(CFG["bailian_base_url"])
+        parsed = urlparse(base_url)
         upstream_path = parsed.path.rstrip("/") + "/chat/completions"
-        auth = (f"Bearer {CFG['bailian_api_key']}"
-                if CFG["bailian_api_key"]
+        auth = (f"Bearer {api_key}"
+                if api_key
                 else self.headers.get("Authorization", ""))
 
         try:
