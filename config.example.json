@@ -1,0 +1,14 @@
+{
+  "model_map": {
+    "bl-llm-1": "glm-5.2",
+    "bl-llm-2": "kimi-k2.7-code"
+  },
+  "bailian_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "bailian_api_key": "sk-your-bailian-key-here",
+  "listen_port": 8787,
+  "tunnel_name": "bailian-proxy",
+  "hostname": "cursor.your-domain.com",
+  "cloudflared_bin": "/opt/homebrew/bin/cloudflared",
+  "cf_credentials_dir": "",
+  "run_tunnel": true
+}
