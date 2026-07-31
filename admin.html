@@ -94,6 +94,13 @@ async function load(){
   renderBadges(s);renderConfig(c);renderModels(c.model_map||{});renderLogs(s.requests||[]);
   }catch(e){/* service unavailable, retry next tick */}
 }
+async function poll(){
+  if(restarting)return;
+  try{
+  const s=await api('/admin/api/status');
+  renderBadges(s);renderLogs(s.requests||[]);
+  }catch(e){/* service unavailable, retry next tick */}
+}
 function renderBadges(s){
   const tp=s.tunnel_pid&&s.tunnel_pid>0;
   const up=s.uptime?fmtUptime(s.uptime):'--';
@@ -220,7 +227,7 @@ function renderLogs(r){
     `${esc(x.model)} <span class="muted">${x.latency_ms}ms</span></div>`
   ).join('');
 }
-load();pollTimer=setInterval(load,5000);
+load();pollTimer=setInterval(poll,5000);
 </script>
 </body>
 </html>
