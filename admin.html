@@ -14,6 +14,9 @@ header h1{font-size:18px;font-weight:600}
 .badge{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
 .dot-ok{background:var(--success)}.dot-err{background:var(--danger)}.dot-warn{background:var(--warn)}
+.sig{color:var(--muted);font-size:12px;opacity:.7;margin-left:6px}
+.sig:hover{opacity:1;color:var(--accent)}
+.title-group{display:flex;align-items:baseline;gap:8px}
 section{margin-bottom:28px}
 h2{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
@@ -34,11 +37,19 @@ th,td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)}
 th{color:var(--muted);font-weight:500;font-size:12px}
 td code{font-family:var(--mono);font-size:12px}
 #overlay{text-align:center;padding:60px;color:var(--muted);font-size:16px}
+#val-errors{background:var(--surface);border:1px solid var(--danger);border-radius:var(--radius);padding:14px;margin-bottom:16px;display:none}
+#val-errors h3{font-size:13px;color:var(--danger);margin-bottom:8px}
+#val-errors li{font-size:12px;color:var(--text);margin:4px 0;list-style:none;padding-left:14px;position:relative}
+#val-errors li:before{content:'!';position:absolute;left:0;color:var(--danger);font-weight:bold}
 </style>
 </head>
 <body>
+<div id="val-errors"><h3>Configuration issues — fix before saving:</h3><ul id="val-list"></ul></div>
 <header>
-  <h1>BYOK Console</h1>
+  <div class="title-group">
+    <h1>BYOK Console</h1>
+    <a class="sig" href="https://github.com/alexwuyh1/cursor-byok-service" target="_blank" rel="noopener">by Alex</a>
+  </div>
   <div class="badges" id="badges"></div>
 </header>
 <section>
@@ -57,7 +68,7 @@ td code{font-family:var(--mono);font-size:12px}
       <div><label>Default Base URL</label><input id="cfg-base-url" placeholder="https://..."></div>
       <div><label>Public Hostname</label><input id="cfg-hostname" placeholder="cursor.domain.com"></div>
       <div><label>Default API Key</label><input id="cfg-api-key" type="password" placeholder="sk-..."></div>
-      <div><label>Tunnel Name</label><input id="cfg-tunnel-name" placeholder="bailian-proxy"></div>
+      <div><label>Tunnel Name</label><input id="cfg-tunnel-name" placeholder="my-tunnel"></div>
       <div><label>Listen Port</label><input id="cfg-port" type="number" value="8787"></div>
       <div><label>Run Tunnel</label><select id="cfg-run-tunnel"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
     </div>
@@ -73,10 +84,15 @@ td code{font-family:var(--mono);font-size:12px}
 </section>
 <script>
 let origCfg={};
-async function api(p,o){const r=await fetch(p,o);return r.json();}
+let restarting=false;
+let pollTimer;
+async function api(p,o){const r=await fetch(p,o);if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 async function load(){
+  if(restarting)return;
+  try{
   const[s,c]=await Promise.all([api('/admin/api/status'),api('/admin/api/config')]);
   renderBadges(s);renderConfig(c);renderModels(c.model_map||{});renderLogs(s.requests||[]);
+  }catch(e){/* service unavailable, retry next tick */}
 }
 function renderBadges(s){
   const tp=s.tunnel_pid&&s.tunnel_pid>0;
@@ -94,8 +110,8 @@ function fmtUptime(s){
 }
 function renderConfig(c){
   origCfg=c;
-  val('cfg-base-url',c.bailian_base_url);val('cfg-hostname',c.hostname);
-  val('cfg-api-key',c.bailian_api_key);val('cfg-tunnel-name',c.tunnel_name);
+  val('cfg-base-url',c.upstream_base_url);val('cfg-hostname',c.hostname);
+  val('cfg-api-key',c.upstream_api_key);val('cfg-tunnel-name',c.tunnel_name);
   val('cfg-port',c.listen_port||8787);
   document.getElementById('cfg-run-tunnel').value=String(c.run_tunnel);
 }
@@ -117,7 +133,7 @@ function addModelRow(alias='',mid='',bu='',ak=''){
     `<button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">Delete</button>`;
   c.appendChild(r);
 }
-function esc(s){return String(s).replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function collectConfig(){
   const mm={};
   document.querySelectorAll('.model-row').forEach(r=>{
@@ -128,9 +144,9 @@ function collectConfig(){
     else mm[a]=m;
   });
   return{model_map:mm,
-    bailian_base_url:document.getElementById('cfg-base-url').value,
+    upstream_base_url:document.getElementById('cfg-base-url').value,
     hostname:document.getElementById('cfg-hostname').value,
-    bailian_api_key:document.getElementById('cfg-api-key').value,
+    upstream_api_key:document.getElementById('cfg-api-key').value,
     tunnel_name:document.getElementById('cfg-tunnel-name').value,
     listen_port:parseInt(document.getElementById('cfg-port').value)||8787,
     run_tunnel:document.getElementById('cfg-run-tunnel').value==='true',
@@ -138,27 +154,73 @@ function collectConfig(){
     cf_credentials_dir:origCfg.cf_credentials_dir||'',
   };
 }
+function validateConfig(cfg){
+  const errors=[];
+  if(cfg.run_tunnel){
+    if(!cfg.hostname)errors.push('Run Tunnel enabled but Public Hostname is empty');
+    if(!cfg.tunnel_name)errors.push('Run Tunnel enabled but Tunnel Name is empty');
+  }
+  const models=Object.entries(cfg.model_map);
+  const hasGlobalURL=!!cfg.upstream_base_url;
+  const hasGlobalKey=!!cfg.upstream_api_key;
+  models.forEach(([alias,entry])=>{
+    const mid=typeof entry==='string'?entry:(entry.model_id||'');
+    if(!mid)errors.push('Model "'+alias+'" has no Model ID');
+    if(typeof entry==='object'){
+      if(!hasGlobalURL&&!entry.base_url)errors.push('Model "'+alias+'" needs global Base URL or its own');
+      if(!hasGlobalKey&&!entry.api_key)errors.push('Model "'+alias+'" needs global API Key or its own');
+    }else{
+      if(!hasGlobalURL)errors.push('Model "'+alias+'" needs global Base URL');
+      if(!hasGlobalKey)errors.push('Model "'+alias+'" needs global API Key');
+    }
+  });
+  return errors;
+}
+function showValErrors(errors){
+  const box=document.getElementById('val-errors');
+  const list=document.getElementById('val-list');
+  if(errors.length===0){box.style.display='none';return false;}
+  list.innerHTML=errors.map(e=>'<li>'+esc(e)+'</li>').join('');
+  box.style.display='block';
+  box.scrollIntoView({behavior:'smooth'});
+  return true;
+}
 async function saveRestart(){
-  await api('/admin/api/config',{method:'POST',body:JSON.stringify(collectConfig()),headers:{'Content-Type':'application/json'}});
+  const cfg=collectConfig();
+  const errors=validateConfig(cfg);
+  if(showValErrors(errors))return;
+  restarting=true;clearInterval(pollTimer);
+  try{
+  await api('/admin/api/config',{method:'POST',body:JSON.stringify(cfg),headers:{'Content-Type':'application/json'}});
   await api('/admin/api/restart',{method:'POST'});
   document.body.innerHTML='<div id="overlay">Saving &amp; restarting...<br>launchd will bring the service back in a few seconds.</div>';
   setTimeout(()=>location.reload(),5000);
+  }catch(e){
+    restarting=false;
+    document.body.innerHTML='<div id="overlay">Save failed: '+esc(e.message)+'<br><button class="btn" onclick="location.reload()">Retry</button></div>';
+  }
 }
 async function restartOnly(){
+  restarting=true;clearInterval(pollTimer);
+  try{
   await api('/admin/api/restart',{method:'POST'});
   document.body.innerHTML='<div id="overlay">Restarting...</div>';
   setTimeout(()=>location.reload(),5000);
+  }catch(e){
+    restarting=false;
+    document.body.innerHTML='<div id="overlay">Restart failed: '+esc(e.message)+'<br><button class="btn" onclick="location.reload()">Retry</button></div>';
+  }
 }
 function renderLogs(r){
   const e=document.getElementById('logs');
   if(!r.length){e.textContent='No requests yet.';return;}
-  e.innerHTML=r.reverse().map(x=>
-    `<div class="le"><span class="t">${x.time}</span> `+
+  e.innerHTML=[...r].reverse().map(x=>
+    `<div class="le"><span class="t">${esc(x.time)}</span> `+
     `<span class="${x.status===200?'ok':'er'}">${x.status}</span> `+
     `${esc(x.model)} <span class="muted">${x.latency_ms}ms</span></div>`
   ).join('');
 }
-load();setInterval(load,5000);
+load();pollTimer=setInterval(load,5000);
 </script>
 </body>
 </html>

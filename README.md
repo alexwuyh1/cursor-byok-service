@@ -20,23 +20,47 @@ brew install python@3.14 cloudflared
 
 ```bash
 git clone <repo-url> && cd cursor-byok-service
-cp config.example.json config.json
-# 编辑 config.json：填入 API key、域名、模型映射
 ./install.sh
 ```
 
-`install.sh` 会交互式引导完成：Cloudflare 认证、创建隧道、DNS 路由、生成 launchd 配置并加载。
+`install.sh` 检测 Python 和 cloudflared 依赖，提示设置监听端口（默认 8787），生成 launchd 配置并启动服务。安装完成后，所有配置通过 Web 控制台完成，不需要手动编辑文件。
+
+### 配置服务
+
+安装后打开管理控制台 `http://127.0.0.1:8787/admin`（端口按安装时设置的填写），填写：
+
+1. **Default API Key** — 你的上游 provider API key
+2. **Default Base URL** — 上游 endpoint（如百炼、DeepSeek）
+3. **Public Hostname** — 你的公网域名（如 `proxy.your-domain.com`）
+4. **Tunnel Name** — cloudflared 隧道名（如 `my-tunnel`）
+5. **Run Tunnel** — 设为 Enabled（完成下方 Cloudflare 设置后）
+6. **Models** — 添加模型别名和对应的真实 model ID
+
+填完点 **Save & Restart**，服务以新配置重启。
+
+### Cloudflare 隧道设置
+
+公网隧道需要一次性配置，在终端执行：
+
+```bash
+# 1. 登录 Cloudflare（浏览器会打开，选择你的域名区域）
+cloudflared tunnel login
+
+# 2. 创建隧道
+cloudflared tunnel create my-tunnel
+
+# 3. 路由 DNS（将域名指向隧道）
+cloudflared tunnel route dns my-tunnel proxy.your-domain.com
+```
+
+完成后回到管理控制台，将 **Run Tunnel** 设为 Enabled 并 Save & Restart。
 
 ### 在 Cursor 中配置
 
 1. Settings → Models → 打开 **OpenAI API Key**，填你的 API key
-2. 打开 **Override OpenAI Base URL**，填 `https://cursor.your-domain.com/v1`
-3. **Add Custom Model**，添加 config.json 里的模型别名（如 `bailian-glm-5.2`）
+2. 打开 **Override OpenAI Base URL**，填 `https://proxy.your-domain.com/v1`
+3. **Add Custom Model**，添加你在控制台里配置的模型别名（如 `glm`）
 4. 选择该模型，开始对话
-
-### Web 控制台
-
-安装后访问 `http://127.0.0.1:8787/admin`，可视化查看运行状态、编辑配置、一键重启。仅本地可访问，公网请求被拒绝。
 
 ## 工作原理
 
@@ -44,26 +68,26 @@ cp config.example.json config.json
 Cursor IDE → Cursor 云端后端 → 公网隧道 → 本地代理 → 上游 Provider
                                   │
                           改写 model 别名
-                          bailian-glm-5.2 → glm-5.2
+                          glm → glm-5.2
 ```
 
 Cursor BYOK 的请求从其云端后端发出，`localhost` 不可达，必须用公网隧道。代理在中间做模型名改写（别名 → 真实 model ID），然后转发给上游 provider。单进程同时管理代理、隧道和 Web 控制台，纯 Python 标准库实现，无需 pip/venv。
 
 ## 配置
 
-`config.json` 是唯一配置源。编辑后重启服务即可生效，`cf-config.yml` 等下游配置由服务自动派生。
+`config.json` 是唯一配置源，由管理控制台管理，无需手动编辑。`config.example.json` 仅作 schema 参考，展示所有字段格式和多 Provider 路由的对象写法，不需要复制使用。编辑配置后重启服务即可生效，`cf-config.yml` 等下游配置由服务自动派生。
 
 ### 字段说明
 
 | 字段 | 说明 | 示例 |
 | --- | --- | --- |
-| `model_map` | 模型别名 → provider 真实 model ID 的映射 | `{"bailian-glm-5.2": "glm-5.2"}` |
-| `bailian_base_url` | 默认上游 endpoint | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `bailian_api_key` | 默认 API key | `sk-xxx` |
-| `hostname` | 公网访问域名 | `cursor.your-domain.com` |
+| `model_map` | 模型别名 → provider 真实 model ID 的映射 | `{"glm": "glm-5.2"}` |
+| `upstream_base_url` | 默认上游 endpoint | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `upstream_api_key` | 默认 API key | `sk-xxx` |
+| `hostname` | 公网访问域名 | `proxy.your-domain.com` |
 | `listen_port` | 本地监听端口 | `8787` |
-| `tunnel_name` | cloudflared 隧道名 | `bailian-proxy` |
-| `cloudflared_bin` | cloudflared 路径 | `/opt/homebrew/bin/cloudflared` |
+| `tunnel_name` | cloudflared 隧道名 | `my-tunnel` |
+| `cloudflared_bin` | cloudflared 路径（留空自动检测） | `/opt/homebrew/bin/cloudflared` |
 | `cf_credentials_dir` | 凭证目录（留空自动推导） | |
 | `run_tunnel` | 是否启动隧道 | `true` |
 
@@ -73,7 +97,7 @@ Cursor BYOK 的请求从其云端后端发出，`localhost` 不可达，必须�
 
 **字符串**（用全局默认地址和 key）：
 ```json
-"bailian-glm-5.2": "glm-5.2"
+"glm": "glm-5.2"
 ```
 
 **对象**（指定独立 provider）：
@@ -85,13 +109,13 @@ Cursor BYOK 的请求从其云端后端发出，`localhost` 不可达，必须�
 }
 ```
 
-一个代理服务同时路由多个 provider，Cursor 里选不同模型名自动走不同后端。
+一个代理服务同时路由多个 provider，Cursor 里选不同模型名自动走不同后端。`config.example.json` 展示了完整的对象写法示例。
 
 ## 日常管理
 
 ### Web 控制台（推荐）
 
-访问 `http://127.0.0.1:8787/admin`：状态总览、模型管理、配置编辑、重启，全程可视化。
+访问 `http://127.0.0.1:8787/admin`：状态总览、模型管理、配置编辑、重启，全程可视化。仅本地可访问，公网请求被拒绝。
 
 ### 命令行
 
@@ -103,7 +127,7 @@ launchctl list | grep cursor.byok
 tail -f service.log
 tail -f tunnel.log
 
-# 重启（改完 config.json 后执行）
+# 重启（在控制台 Save & Restart 也可）
 launchctl unload ~/Library/LaunchAgents/com.cursor.byok.service.plist
 launchctl load ~/Library/LaunchAgents/com.cursor.byok.service.plist
 ```
@@ -114,8 +138,8 @@ launchctl load ~/Library/LaunchAgents/com.cursor.byok.service.plist
 cursor-byok-service/
 ├── cursor-byok-service.py   # 核心服务（代理 + 隧道 + 控制台 API）
 ├── admin.html               # Web 控制台前端
-├── config.json              # 实际配置（gitignore，含 API key）
-├── config.example.json      # 配置模板（安全，可提交）
+├── config.json              # 实际配置（install.sh 生成，控制台管理，gitignore）
+├── config.example.json      # 配置 schema 参考（可提交）
 ├── install.sh               # 一键安装
 ├── cf-config.yml             # 自动生成（gitignore）
 ├── service.log              # 运行日志（gitignore）
@@ -124,11 +148,11 @@ cursor-byok-service/
 
 ## 注意事项
 
-- **模型别名加前缀即可**：如 `bailian-glm-5.2` 不会触发 Cursor 内置模型匹配，无需用无辨识度的名字。
+- **模型别名加前缀即可**：如 `glm` 不会触发 Cursor 内置模型匹配，别名可以和真实模型名不同，代理会自动改写。
 - **localhost 不可达**：Cursor BYOK 请求从云端后端发出，必须用公网隧道。
 - **Admin 仅本地**：控制台和 admin API 通过 Host 头校验，公网请求返回 403。
 - **用 Homebrew Python**：`/opt/homebrew/bin/python3`，不要用 `/usr/bin/python3`（沙箱权限问题）。
-- **config.json 不提交 git**：含 API key，已 gitignore，用 `config.example.json` 做模板。
+- **config.json 不提交 git**：含 API key，已 gitignore。由 `install.sh` 首次生成，后续通过管理控制台编辑，`config.example.json` 仅作 schema 参考。
 
 ## License
 

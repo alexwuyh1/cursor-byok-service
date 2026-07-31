@@ -1,19 +1,19 @@
 {
   "model_map": {
-    "bl-llm-1": "glm-5.2",
-    "bl-llm-2": "kimi-k2.7-code",
-    "bl-llm-3": {
+    "glm": "glm-5.2",
+    "kimi": "kimi-k2.7-code",
+    "deepseek-chat": {
       "model_id": "deepseek-chat",
       "base_url": "https://api.deepseek.com/v1",
-      "api_key": "sk-another-provider-key"
+      "api_key": "sk-your-deepseek-key"
     }
   },
-  "bailian_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  "bailian_api_key": "sk-your-bailian-key-here",
+  "upstream_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "upstream_api_key": "sk-your-api-key",
   "listen_port": 8787,
-  "tunnel_name": "bailian-proxy",
-  "hostname": "cursor.your-domain.com",
-  "cloudflared_bin": "/opt/homebrew/bin/cloudflared",
+  "tunnel_name": "my-tunnel",
+  "hostname": "proxy.your-domain.com",
+  "cloudflared_bin": "",
   "cf_credentials_dir": "",
   "run_tunnel": true
 }

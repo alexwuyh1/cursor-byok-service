@@ -27,15 +27,15 @@ _CFG_PATH = os.path.join(_DIR, "config.json")
 _CF_CFG_PATH = os.path.join(_DIR, "cf-config.yml")
 
 _DEFAULTS = {
-    "model_map": {"bl-llm-1": "glm-5.2", "bl-llm-2": "kimi-k2.7-code"},
-    "bailian_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "bailian_api_key": "",
+    "model_map": {},
+    "upstream_base_url": "",
+    "upstream_api_key": "",
     "listen_port": 8787,
-    "tunnel_name": "bailian-proxy",
-    "hostname": "cursor.alexwuyh.dpdns.org",
-    "cloudflared_bin": "/opt/homebrew/bin/cloudflared",
+    "tunnel_name": "",
+    "hostname": "",
+    "cloudflared_bin": "",
     "cf_credentials_dir": "",
-    "run_tunnel": True,
+    "run_tunnel": False,
 }
 
 
@@ -48,10 +48,26 @@ def _load_config():
                 cfg.update(user_cfg)
         except (json.JSONDecodeError, OSError) as exc:
             print(f"[WARN] config.json unreadable: {exc}", file=sys.stderr)
-    if os.environ.get("BAILIAN_API_KEY"):
-        cfg["bailian_api_key"] = os.environ["BAILIAN_API_KEY"]
+    # backward compat: bailian_* → upstream_*
+    if "bailian_base_url" in cfg:
+        if not cfg.get("upstream_base_url"):
+            cfg["upstream_base_url"] = cfg["bailian_base_url"]
+        del cfg["bailian_base_url"]
+    if "bailian_api_key" in cfg:
+        if not cfg.get("upstream_api_key"):
+            cfg["upstream_api_key"] = cfg["bailian_api_key"]
+        del cfg["bailian_api_key"]
+    if os.environ.get("UPSTREAM_API_KEY"):
+        cfg["upstream_api_key"] = os.environ["UPSTREAM_API_KEY"]
+    elif os.environ.get("BAILIAN_API_KEY"):
+        cfg["upstream_api_key"] = os.environ["BAILIAN_API_KEY"]
     if not cfg.get("cf_credentials_dir"):
         cfg["cf_credentials_dir"] = os.path.expanduser("~/.cloudflared")
+    if not cfg.get("cloudflared_bin"):
+        for p in ("/opt/homebrew/bin/cloudflared", "/usr/local/bin/cloudflared"):
+            if os.path.exists(p):
+                cfg["cloudflared_bin"] = p
+                break
     return cfg
 
 
@@ -148,14 +164,14 @@ def _generate_cf_config():
 def _resolve_model(alias):
     entry = CFG["model_map"].get(alias)
     if entry is None:
-        return alias, CFG["bailian_base_url"], CFG["bailian_api_key"]
+        return alias, CFG["upstream_base_url"], CFG["upstream_api_key"]
     if isinstance(entry, str):
-        return entry, CFG["bailian_base_url"], CFG["bailian_api_key"]
+        return entry, CFG["upstream_base_url"], CFG["upstream_api_key"]
     if isinstance(entry, dict):
         return (entry.get("model_id", alias),
-                entry.get("base_url", CFG["bailian_base_url"]),
-                entry.get("api_key", CFG["bailian_api_key"]))
-    return alias, CFG["bailian_base_url"], CFG["bailian_api_key"]
+                entry.get("base_url", CFG["upstream_base_url"]),
+                entry.get("api_key", CFG["upstream_api_key"]))
+    return alias, CFG["upstream_base_url"], CFG["upstream_api_key"]
 
 # ---------------------------------------------------------------------------
 # Admin console — loaded from admin.html at startup
@@ -352,6 +368,9 @@ class _Server(http.server.ThreadingHTTPServer):
 def _run_tunnel():
     if not CFG.get("run_tunnel", True):
         return
+    if not CFG.get("hostname"):
+        print("[INFO] tunnel disabled (hostname not configured)", flush=True)
+        return
     if not _generate_cf_config():
         print("[ERROR] cannot start tunnel", flush=True)
         return
@@ -408,8 +427,14 @@ def main():
 
     print(f"[INFO] proxy on http://127.0.0.1:{port}/v1", flush=True)
     print(f"[INFO] console at http://127.0.0.1:{port}/admin", flush=True)
-    print(f"[INFO] models: {list(CFG['model_map'])}", flush=True)
-    print(f"[INFO] public URL: https://{CFG['hostname']}/v1", flush=True)
+    if CFG["model_map"]:
+        print(f"[INFO] models: {list(CFG['model_map'])}", flush=True)
+    else:
+        print("[INFO] no models configured — set up in admin console", flush=True)
+    if CFG["hostname"]:
+        print(f"[INFO] public URL: https://{CFG['hostname']}/v1", flush=True)
+    else:
+        print("[INFO] tunnel not configured — see admin console", flush=True)
 
     def _sig(signum, _frame):
         print(f"[INFO] signal {signum}", flush=True)
