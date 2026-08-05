@@ -72,6 +72,14 @@ def _load_config():
 
 
 CFG = _load_config()
+
+
+def _reload_config():
+    """Re-read config.json into the live CFG so model/upstream changes take
+    effect immediately without a restart."""
+    global CFG
+    CFG = _load_config()
+
 _shutdown = threading.Event()
 
 # Stats tracking
@@ -98,6 +106,35 @@ def _log_request(model, status, latency_ms):
 # ---------------------------------------------------------------------------
 # Cloudflared config derivation
 # ---------------------------------------------------------------------------
+
+def _cf_logged_in():
+    """True if cloudflared has been logged in (cert.pem present)."""
+    cred_dir = CFG.get("cf_credentials_dir") or os.path.expanduser("~/.cloudflared")
+    return os.path.exists(os.path.join(cred_dir, "cert.pem"))
+
+
+_cf_login_proc = None
+
+
+def _start_cf_login():
+    """Launch `cloudflared tunnel login` in the background. It opens the
+    default browser for OAuth and writes cert.pem on success; the console's
+    status poll then picks up the login automatically. Idempotent."""
+    global _cf_login_proc
+    with _stats_lock:
+        if _cf_logged_in():
+            return "already_logged_in"
+        if _cf_login_proc and _cf_login_proc.poll() is None:
+            return "already_running"
+        try:
+            _cf_login_proc = subprocess.Popen(
+                [CFG["cloudflared_bin"], "tunnel", "login"],
+            )
+        except FileNotFoundError:
+            return "cloudflared_not_found"
+        print("[INFO] cloudflared login started (browser OAuth)", flush=True)
+        return "started"
+
 
 def _lookup_tunnel_uuid(tunnel_name, cf_bin, credentials_dir):
     try:
@@ -133,15 +170,78 @@ def _find_credentials_file(uuid, credentials_dir):
         for f in os.listdir(credentials_dir):
             if f.startswith(uuid) and f.endswith(".json"):
                 return os.path.join(credentials_dir, f)
+    # fallback: `cloudflared tunnel create` writes to its default dir regardless
+    # of the configured credentials_dir.
+    default_dir = os.path.expanduser("~/.cloudflared")
+    if default_dir != credentials_dir and os.path.isdir(default_dir):
+        for f in os.listdir(default_dir):
+            if f.startswith(uuid) and f.endswith(".json"):
+                return os.path.join(default_dir, f)
     return candidate
 
 
+def _ensure_tunnel(tunnel_name, cf_bin, credentials_dir):
+    """Return the tunnel UUID, creating the tunnel if it doesn't exist.
+    Requires cloudflared login (cert.pem)."""
+    uuid = _lookup_tunnel_uuid(tunnel_name, cf_bin, credentials_dir)
+    if uuid:
+        return uuid
+    if not _cf_logged_in():
+        return None
+    print(f"[INFO] creating tunnel '{tunnel_name}'", flush=True)
+    try:
+        result = subprocess.run(
+            [cf_bin, "tunnel", "create", tunnel_name],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        print(f"[ERROR] tunnel create failed: {exc}", flush=True)
+        return None
+    if result.returncode != 0:
+        print(f"[WARN] tunnel create rc={result.returncode}: "
+              f"{(result.stderr or result.stdout).strip()}", flush=True)
+    return _lookup_tunnel_uuid(tunnel_name, cf_bin, credentials_dir)
+
+
+def _ensure_dns_route(cf_bin, tunnel_name, hostname):
+    """Create the DNS CNAME for hostname -> tunnel. Returns True if the route
+    is managed by Cloudflare (created or already exists); False if the user
+    must add a CNAME manually (e.g. hostname's zone is not in the account)."""
+    try:
+        result = subprocess.run(
+            [cf_bin, "tunnel", "route", "dns", tunnel_name, hostname],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        print(f"[ERROR] route dns failed: {exc}", flush=True)
+        return False
+    out = (result.stderr + result.stdout).lower()
+    if result.returncode == 0 or "already" in out:
+        print(f"[INFO] dns route managed by Cloudflare: {hostname}", flush=True)
+        return True
+    print(f"[WARN] dns route not auto-managed; manual CNAME needed: "
+          f"{(result.stderr or result.stdout).strip()}", flush=True)
+    return False
+
+
+_tunnel_meta = {"uuid": None, "dns_managed": None, "cname_target": None}
+
+
 def _generate_cf_config():
-    uuid = _lookup_tunnel_uuid(
+    if not _cf_logged_in():
+        print("[INFO] cloudflared not logged in — skipping tunnel", flush=True)
+        return False
+    uuid = _ensure_tunnel(
         CFG["tunnel_name"], CFG["cloudflared_bin"], CFG["cf_credentials_dir"])
     if not uuid:
-        print(f"[ERROR] tunnel '{CFG['tunnel_name']}' not found", flush=True)
+        print(f"[ERROR] tunnel '{CFG['tunnel_name']}' unavailable", flush=True)
         return False
+    dns_managed = _ensure_dns_route(
+        CFG["cloudflared_bin"], CFG["tunnel_name"], CFG["hostname"])
+    with _stats_lock:
+        _tunnel_meta["uuid"] = uuid
+        _tunnel_meta["dns_managed"] = dns_managed
+        _tunnel_meta["cname_target"] = f"{uuid}.cfargotunnel.com"
     creds = _find_credentials_file(uuid, CFG["cf_credentials_dir"])
     yml = (
         f"tunnel: {uuid}\n"
@@ -153,7 +253,8 @@ def _generate_cf_config():
     )
     with open(_CF_CFG_PATH, "w") as f:
         f.write(yml)
-    print(f"[INFO] cf-config.yml (tunnel={uuid}, host={CFG['hostname']})", flush=True)
+    print(f"[INFO] cf-config.yml (tunnel={uuid}, host={CFG['hostname']}, "
+          f"dns={'managed' if dns_managed else 'manual'})", flush=True)
     return True
 
 
@@ -162,16 +263,18 @@ def _generate_cf_config():
 # ---------------------------------------------------------------------------
 
 def _resolve_model(alias):
-    entry = CFG["model_map"].get(alias)
+    cfg = CFG
+    entry = cfg["model_map"].get(alias)
     if entry is None:
-        return alias, CFG["upstream_base_url"], CFG["upstream_api_key"]
+        return alias, cfg["upstream_base_url"], cfg["upstream_api_key"], True
     if isinstance(entry, str):
-        return entry, CFG["upstream_base_url"], CFG["upstream_api_key"]
+        return entry, cfg["upstream_base_url"], cfg["upstream_api_key"], True
     if isinstance(entry, dict):
         return (entry.get("model_id", alias),
-                entry.get("base_url", CFG["upstream_base_url"]),
-                entry.get("api_key", CFG["upstream_api_key"]))
-    return alias, CFG["upstream_base_url"], CFG["upstream_api_key"]
+                entry.get("base_url", cfg["upstream_base_url"]),
+                entry.get("api_key", cfg["upstream_api_key"]),
+                entry.get("enabled", True))
+    return alias, cfg["upstream_base_url"], cfg["upstream_api_key"], True
 
 # ---------------------------------------------------------------------------
 # Admin console — loaded from admin.html at startup
@@ -229,21 +332,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with _stats_lock:
                 reqs = list(_stats["requests"][-20:])
                 pid = _stats["tunnel_pid"]
+                tmeta = dict(_tunnel_meta)
             self._json(200, {
                 "proxy_running": True,
                 "tunnel_pid": pid,
                 "uptime": time.time() - _stats["start_time"],
-                "model_count": len(CFG["model_map"]),
+                "model_count": len(mm := CFG["model_map"]),
+                "disabled_count": sum(1 for e in mm.values()
+                                      if isinstance(e, dict) and e.get("enabled") is False),
+                "cf_logged_in": _cf_logged_in(),
+                "tunnel_uuid": tmeta["uuid"],
+                "tunnel_dns_managed": tmeta["dns_managed"],
+                "tunnel_cname_target": tmeta["cname_target"],
                 "requests": reqs,
             })
         elif p == "/admin/api/config":
             if not self._is_localhost():
                 self._json(403, {"error": "admin API is local-only"})
                 return
-            safe = dict(CFG)
-            self._json(200, safe)
+            self._json(200, _load_config())
         elif p == "/v1/models":
-            models = [{"id": a, "object": "model"} for a in CFG["model_map"]]
+            models = [{"id": a, "object": "model"} for a, e in CFG["model_map"].items()
+                       if not (isinstance(e, dict) and e.get("enabled") is False)]
             self._json(200, {"object": "list", "data": models})
         elif p in ("/", "/health"):
             self._json(200, {"status": "ok"})
@@ -268,7 +378,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with open(_CFG_PATH, "w") as f:
                 json.dump(new_cfg, f, indent=2, ensure_ascii=False)
                 f.write("\n")
-            print("[INFO] config.json updated via admin console", flush=True)
+            _reload_config()
+            print("[INFO] config.json updated (hot-applied)", flush=True)
             self._json(200, {"status": "saved"})
             return
 
@@ -279,6 +390,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self._json(200, {"status": "restarting"})
             threading.Timer(0.5, _shutdown.set).start()
+            return
+
+        if p == "/admin/api/cf-login":
+            if not self._is_localhost():
+                self._json(403, {"error": "admin API is local-only"})
+                return
+            self._json(200, {"status": _start_cf_login()})
             return
 
         # Proxy: chat completions
@@ -296,7 +414,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         original = body.get("model", "")
-        model_id, base_url, api_key = _resolve_model(original)
+        model_id, base_url, api_key, enabled = _resolve_model(original)
+        if not enabled:
+            _log_request(original, 503, 0)
+            self._json(503, {"error": f"model '{original}' is disabled"})
+            return
         body["model"] = model_id
         is_stream = body.get("stream", False)
 
@@ -371,16 +493,19 @@ def _run_tunnel():
     if not CFG.get("hostname"):
         print("[INFO] tunnel disabled (hostname not configured)", flush=True)
         return
-    if not _generate_cf_config():
-        print("[ERROR] cannot start tunnel", flush=True)
-        return
-
     bin_path = CFG["cloudflared_bin"]
     log_path = os.path.join(_DIR, "tunnel.log")
 
     while not _shutdown.is_set():
+        if not _generate_cf_config():
+            print("[WARN] tunnel setup failed, retry in 30s", flush=True)
+            if _shutdown.wait(timeout=30):
+                return
+            continue
         print(f"[INFO] starting cloudflared", flush=True)
         try:
+            if os.path.getsize(log_path) > 5_000_000:
+                os.replace(log_path, log_path + ".1")
             log_file = open(log_path, "a")
             proc = subprocess.Popen(
                 [bin_path, "tunnel", "--config", _CF_CFG_PATH, "run"],
@@ -443,7 +568,11 @@ def main():
     signal.signal(signal.SIGTERM, _sig)
     signal.signal(signal.SIGINT, _sig)
 
-    _shutdown.wait()
+    while not _shutdown.is_set():
+        server_thread.join(timeout=1)
+        if not server_thread.is_alive():
+            print("[ERROR] server thread died, exiting for restart", flush=True)
+            os._exit(1)
     server.shutdown()
     server.server_close()
     print("[INFO] stopped", flush=True)

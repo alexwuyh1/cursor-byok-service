@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -24,9 +24,11 @@ label{display:block;font-size:12px;color:var(--muted);margin:8px 0 4px}
 input,select{width:100%;padding:7px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font:13px var(--mono);outline:none}
 input:focus{border-color:var(--accent)}
 .btn{display:inline-block;padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;font-weight:500}
-.btn:hover{opacity:.85}.btn-danger{background:var(--danger)}.btn-sm{padding:4px 10px;font-size:11px}
+.btn:hover{opacity:.85}.btn-danger{background:var(--danger)}.btn-success{background:var(--success)}.btn-warn{background:var(--warn)}.btn-sm{padding:4px 10px;font-size:11px}
+.model-actions{display:flex;gap:4px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .actions{display:flex;gap:8px;margin-top:14px}
+.actions-global{margin-bottom:28px}
 .muted{color:var(--muted);font-size:12px}
 .model-row{display:grid;grid-template-columns:1fr 1fr 1.4fr 1.4fr auto;gap:6px;align-items:end;margin-bottom:8px}
 .model-row input{font-size:12px}
@@ -41,48 +43,113 @@ td code{font-family:var(--mono);font-size:12px}
 #val-errors h3{font-size:13px;color:var(--danger);margin-bottom:8px}
 #val-errors li{font-size:12px;color:var(--text);margin:4px 0;list-style:none;padding-left:14px;position:relative}
 #val-errors li:before{content:'!';position:absolute;left:0;color:var(--danger);font-weight:bold}
+#alert-banner{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:100;max-width:88vw;background:var(--danger);color:#fff;padding:10px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.45);display:none;text-align:center}
+#alert-banner button{vertical-align:middle;margin-left:10px}
+#alert-banner code{background:rgba(0,0,0,.25);padding:1px 5px;border-radius:3px;font-family:var(--mono)}
 </style>
 </head>
 <body>
-<div id="val-errors"><h3>Configuration issues — fix before saving:</h3><ul id="val-list"></ul></div>
+<div id="alert-banner"></div>
+<div id="val-errors"><h3 id="val-title"></h3><ul id="val-list"></ul></div>
 <header>
   <div class="title-group">
-    <h1>BYOK Console</h1>
+    <h1 id="title"></h1>
     <a class="sig" href="https://github.com/alexwuyh1/cursor-byok-service" target="_blank" rel="noopener">by Alex</a>
   </div>
   <div class="badges" id="badges"></div>
 </header>
 <section>
-  <h2>Models</h2>
+  <h2 id="h-models"></h2>
   <div class="card">
     <div id="model-rows"></div>
     <div class="actions">
-      <button class="btn btn-sm" onclick="addModelRow()">+ Add Model</button>
+      <button class="btn btn-sm" id="btn-add-model" onclick="addModelRow()"></button>
     </div>
   </div>
 </section>
 <section>
-  <h2>Global Config</h2>
+  <h2 id="h-upstream"></h2>
   <div class="card">
     <div class="grid2">
-      <div><label>Default Base URL</label><input id="cfg-base-url" placeholder="https://..."></div>
-      <div><label>Public Hostname</label><input id="cfg-hostname" placeholder="cursor.domain.com"></div>
-      <div><label>Default API Key</label><input id="cfg-api-key" type="password" placeholder="sk-..."></div>
-      <div><label>Tunnel Name</label><input id="cfg-tunnel-name" placeholder="my-tunnel"></div>
-      <div><label>Listen Port</label><input id="cfg-port" type="number" value="8787"></div>
-      <div><label>Run Tunnel</label><select id="cfg-run-tunnel"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
-    </div>
-    <div class="actions">
-      <button class="btn" onclick="saveRestart()">Save &amp; Restart</button>
-      <button class="btn btn-danger" onclick="restartOnly()">Restart Only</button>
+      <div><label id="l-base-url" for="cfg-base-url"></label><input id="cfg-base-url"></div>
+      <div><label id="l-api-key" for="cfg-api-key"></label><input id="cfg-api-key" type="password"></div>
     </div>
   </div>
 </section>
 <section>
-  <h2>Recent Requests</h2>
-  <div class="card"><div class="logs" id="logs">No requests yet.</div></div>
+  <h2 id="h-tunnel"></h2>
+  <div class="card">
+    <div class="grid2">
+      <div><label id="l-hostname" for="cfg-hostname"></label><input id="cfg-hostname"></div>
+      <div><label id="l-tunnel-name" for="cfg-tunnel-name"></label><input id="cfg-tunnel-name"></div>
+      <div><label id="l-port" for="cfg-port"></label><input id="cfg-port" type="number" value="8787"></div>
+      <div><label id="l-run-tunnel" for="cfg-run-tunnel"></label><select id="cfg-run-tunnel"><option value="true" id="opt-enabled"></option><option value="false" id="opt-disabled"></option></select></div>
+      <div><label id="l-cf-bin" for="cfg-cf-bin"></label><input id="cfg-cf-bin"></div>
+      <div><label id="l-cf-creds" for="cfg-cf-creds"></label><input id="cfg-cf-creds"></div>
+    </div>
+  </div>
+</section>
+<div class="actions actions-global">
+  <button class="btn" id="btn-save" onclick="saveOnly()"></button>
+  <button class="btn" id="btn-save-restart" onclick="saveRestart()"></button>
+  <button class="btn btn-danger" id="btn-restart" onclick="restartOnly()"></button>
+</div>
+<section>
+  <h2 id="h-requests"></h2>
+  <div class="card"><div class="logs" id="logs"></div></div>
 </section>
 <script>
+const I18N={
+en:{title:"BYOK Console",models:"Models",upstream:"Upstream",tunnel:"Tunnel",requests:"Recent Requests",
+add_model:"+ Add Model",alias:"Alias",model_id:"Model ID",base_url_ph:"Base URL (blank=default)",api_key_ph:"API Key (blank=default)",
+default_base_url:"Default Base URL",default_api_key:"Default API Key",public_hostname:"Public Hostname",tunnel_name:"Tunnel Name",
+listen_port:"Listen Port",run_tunnel:"Run Tunnel",enabled:"Enabled",disabled:"Disabled",cf_bin:"Cloudflared Binary",cf_creds:"Credentials Dir",
+save:"Save",save_restart:"Save & Restart",restart:"Restart Only",del:"Delete",disable:"Disable",enable:"Enable",login_cf:"Login Cloudflare",
+proxy:"Proxy",logged_in:"logged in",not_logged_in:"not logged in",ok:"OK",down:"Down",models_badge:"Models",
+cf_not_logged_in:"Cloudflare not logged in — tunnel features unavailable. Click to authorize in the browser; it turns green once logged in.",
+tunnel_down:"Tunnel down — public ingress unavailable. Local proxy still works; service auto-retries.",
+dns_manual:"Public DNS needs manual setup: add a CNAME record at your DNS provider pointing {host} to {target}. The tunnel is ready; it takes effect once added.",
+saved_hot:"Saved — config applied hot.",saved_needs_restart:"Saved & hot-applied. Port/tunnel changes need a restart to take effect.",
+restart_now:"Restart now",later:"Later",saving_restart:"Saving & restarting... launchd will bring the service back in a few seconds.",
+restarting:"Restarting...",save_failed:"Save failed: ",restart_failed:"Restart failed: ",retry:"Retry",no_requests:"No requests yet.",
+cf_not_found:"cloudflared not found. Install it first: brew install cloudflared",login_req_failed:"Login request failed: ",
+val_title:"Configuration issues — fix before saving:",
+val_tunnel_no_host:"Run Tunnel enabled but Public Hostname is empty",val_tunnel_no_name:"Run Tunnel enabled but Tunnel Name is empty",
+val_no_mid:'Model "{a}" has no Model ID',val_no_url_global:'Model "{a}" needs a global Base URL',val_no_key_global:'Model "{a}" needs a global API Key',
+val_no_url:'Model "{a}" needs a global Base URL or its own',val_no_key:'Model "{a}" needs a global API Key or its own'},
+zh:{title:"BYOK 控制台",models:"模型",upstream:"上游配置",tunnel:"隧道",requests:"最近请求",
+add_model:"+ 添加模型",alias:"别名",model_id:"模型 ID",base_url_ph:"Base URL（空=默认）",api_key_ph:"API Key（空=默认）",
+default_base_url:"默认 Base URL",default_api_key:"默认 API Key",public_hostname:"公网域名",tunnel_name:"隧道名称",
+listen_port:"监听端口",run_tunnel:"运行隧道",enabled:"启用",disabled:"禁用",cf_bin:"Cloudflared 路径",cf_creds:"凭据目录",
+save:"保存",save_restart:"保存并重启",restart:"仅重启",del:"删除",disable:"关闭",enable:"开启",login_cf:"登录 Cloudflare",
+proxy:"代理",logged_in:"已登录",not_logged_in:"未登录",ok:"正常",down:"断开",models_badge:"模型",
+cf_not_logged_in:"Cloudflare 未登录 — 隧道功能不可用。点此在浏览器完成授权，授权后此处自动变绿。",
+tunnel_down:"隧道未运行 — 公网入口不可用，本地代理仍可访问，服务会自动重试重连。",
+dns_manual:"公网 DNS 需手动配置：请在 DNS 服务商添加 CNAME 记录，将 {host} 指向 {target}。隧道已就绪，添加后即生效。",
+saved_hot:"已保存，配置已热生效。",saved_needs_restart:"已保存并热生效。端口/隧道相关改动需重启才生效。",
+restart_now:"立即重启",later:"稍后",saving_restart:"保存并重启中… launchd 会在几秒后拉起服务。",
+restarting:"重启中…",save_failed:"保存失败：",restart_failed:"重启失败：",retry:"重试",no_requests:"暂无请求。",
+cf_not_found:"未找到 cloudflared，请先安装：brew install cloudflared",login_req_failed:"登录请求失败：",
+val_title:"配置问题 — 保存前请修复：",
+val_tunnel_no_host:"已启用隧道但公网域名为空",val_tunnel_no_name:"已启用隧道但隧道名称为空",
+val_no_mid:'模型"{a}"未填 Model ID',val_no_url_global:'模型"{a}"需要全局 Base URL',val_no_key_global:'模型"{a}"需要全局 API Key',
+val_no_url:'模型"{a}"需要全局 Base URL 或单独配置',val_no_key:'模型"{a}"需要全局 API Key 或单独配置'}
+};
+let lang=(navigator.language||'en').toLowerCase().startsWith('zh')?'zh':'en';
+function t(k){return I18N[lang][k]??I18N.en[k]??k;}
+function applyI18n(){
+document.documentElement.lang=lang;
+const m={title:'title',models:'h-models',upstream:'h-upstream',tunnel:'h-tunnel',requests:'h-requests',
+add_model:'btn-add-model',default_base_url:'l-base-url',default_api_key:'l-api-key',public_hostname:'l-hostname',
+tunnel_name:'l-tunnel-name',listen_port:'l-port',run_tunnel:'l-run-tunnel',enabled:'opt-enabled',disabled:'opt-disabled',
+cf_bin:'l-cf-bin',cf_creds:'l-cf-creds',save:'btn-save',save_restart:'btn-save-restart',restart:'btn-restart',val_title:'val-title'};
+for(const k in m)document.getElementById(m[k]).textContent=t(k);
+document.getElementById('cfg-hostname').placeholder='cursor.domain.com';
+document.getElementById('cfg-tunnel-name').placeholder='my-tunnel';
+document.getElementById('cfg-cf-bin').placeholder='/opt/homebrew/bin/cloudflared';
+document.getElementById('cfg-cf-creds').placeholder='~/.cloudflared';
+}
+
 let origCfg={};
 let restarting=false;
 let pollTimer;
@@ -101,14 +168,41 @@ async function poll(){
   renderBadges(s);renderLogs(s.requests||[]);
   }catch(e){/* service unavailable, retry next tick */}
 }
+async function cfLogin(){
+  try{
+    const r=await api('/admin/api/cf-login',{method:'POST'});
+    if(r.status==='cloudflared_not_found'){alert(t('cf_not_found'));}
+  }catch(e){alert(t('login_req_failed')+e.message);}
+}
 function renderBadges(s){
   const tp=s.tunnel_pid&&s.tunnel_pid>0;
+  const cf=s.cf_logged_in;
   const up=s.uptime?fmtUptime(s.uptime):'--';
+  const mc=s.model_count||0,dc=s.disabled_count||0;
+  const mt=dc>0?(mc-dc)+'/'+mc+' '+t('models_badge'):(mc>0?mc+' '+t('models_badge'):'0 '+t('models_badge'));
+  const mDot=mc===0?'dot-err':(dc>0?'dot-warn':'dot-ok');
   document.getElementById('badges').innerHTML=
-    `<span class="badge"><span class="dot dot-ok"></span>Proxy</span>`+
-    `<span class="badge"><span class="dot ${tp?'dot-ok':'dot-err'}"></span>Tunnel ${tp?'OK':'Down'}</span>`+
-    `<span class="badge"><span class="dot dot-warn"></span>${up}</span>`+
-    `<span class="badge"><span class="dot dot-ok"></span>${s.model_count||0} Models</span>`;
+    `<span class="badge"><span class="dot dot-ok"></span>${esc(t('proxy'))}</span>`+
+    `<span class="badge"><span class="dot ${cf?'dot-ok':'dot-err'}"></span>Cloudflare ${cf?esc(t('logged_in')):esc(t('not_logged_in'))}</span>`+
+    `<span class="badge"><span class="dot ${tp?'dot-ok':'dot-err'}"></span>${esc(t('tunnel'))} ${tp?esc(t('ok')):esc(t('down'))}</span>`+
+    `<span class="badge"><span class="dot dot-warn"></span>${esc(up)}</span>`+
+    `<span class="badge"><span class="dot ${mDot}"></span>${esc(mt)}</span>`;
+  const ab=document.getElementById('alert-banner');
+  if(!cf){
+    ab.style.background='var(--danger)';
+    ab.innerHTML='<span>'+esc(t('cf_not_logged_in'))+'</span> <button class="btn btn-sm" onclick="cfLogin()">'+esc(t('login_cf'))+'</button>';
+    ab.style.display='block';
+  }else if(s.tunnel_uuid&&s.tunnel_dns_managed===false){
+    ab.style.background='var(--warn)';
+    ab.innerHTML='<span>'+t('dns_manual').replace('{host}','<code>'+esc(origCfg.hostname||'')+'</code>').replace('{target}','<code>'+esc(s.tunnel_cname_target||'')+'</code>')+'</span>';
+    ab.style.display='block';
+  }else if(!tp){
+    ab.style.background='var(--warn)';
+    ab.textContent=t('tunnel_down');
+    ab.style.display='block';
+  }else{
+    ab.style.display='none';
+  }
 }
 function fmtUptime(s){
   if(s<60)return Math.round(s)+'s';
@@ -120,25 +214,43 @@ function renderConfig(c){
   val('cfg-base-url',c.upstream_base_url);val('cfg-hostname',c.hostname);
   val('cfg-api-key',c.upstream_api_key);val('cfg-tunnel-name',c.tunnel_name);
   val('cfg-port',c.listen_port||8787);
+  val('cfg-cf-bin',c.cloudflared_bin);val('cfg-cf-creds',c.cf_credentials_dir);
   document.getElementById('cfg-run-tunnel').value=String(c.run_tunnel);
 }
 function val(id,v){document.getElementById(id).value=v||'';}
 function renderModels(mm){
   const c=document.getElementById('model-rows');c.innerHTML='';
   for(const[a,e]of Object.entries(mm)){
-    if(typeof e==='string')addModelRow(a,e,'','');
-    else addModelRow(a,e.model_id||'',e.base_url||'',e.api_key||'');
+    if(typeof e==='string')addModelRow(a,e,'','',true);
+    else addModelRow(a,e.model_id||'',e.base_url||'',e.api_key||'',e.enabled!==false);
   }
 }
-function addModelRow(alias='',mid='',bu='',ak=''){
+function addModelRow(alias='',mid='',bu='',ak='',enabled=true){
   const c=document.getElementById('model-rows');
   const r=document.createElement('div');r.className='model-row';
-  r.innerHTML=`<input placeholder="Alias" value="${esc(alias)}">`+
-    `<input placeholder="Model ID" value="${esc(mid)}">`+
-    `<input placeholder="Base URL (blank=default)" value="${esc(bu)}">`+
-    `<input placeholder="API Key (blank=default)" type="password" value="${esc(ak)}">`+
-    `<button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">Delete</button>`;
-  c.appendChild(r);
+  r.dataset.enabled=String(enabled);
+  r.innerHTML=`<input placeholder="${esc(t('alias'))}" value="${esc(alias)}">`+
+    `<input placeholder="${esc(t('model_id'))}" value="${esc(mid)}">`+
+    `<input placeholder="${esc(t('base_url_ph'))}" value="${esc(bu)}">`+
+    `<input placeholder="${esc(t('api_key_ph'))}" type="password" value="${esc(ak)}">`+
+    `<div class="model-actions">`+
+    `<button class="btn btn-sm btn-warn" onclick="toggleModel(this)">${esc(t('disable'))}</button>`+
+    `<button class="btn btn-danger btn-sm" onclick="deleteModel(this)">${esc(t('del'))}</button>`+
+    `</div>`;
+  c.appendChild(r);applyModelToggle(r);
+}
+function deleteModel(btn){btn.closest('.model-row').remove();}
+function toggleModel(btn){
+  const row=btn.closest('.model-row');
+  row.dataset.enabled=String(row.dataset.enabled==='false');
+  applyModelToggle(row);
+}
+function applyModelToggle(row){
+  const en=row.dataset.enabled!=='false';
+  const btn=row.querySelector('.model-actions button');
+  btn.textContent=en?t('disable'):t('enable');
+  btn.className='btn btn-sm '+(en?'btn-warn':'btn-success');
+  row.style.opacity=en?'':'.5';
 }
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function collectConfig(){
@@ -147,38 +259,40 @@ function collectConfig(){
     const i=r.querySelectorAll('input');
     const a=i[0].value.trim();if(!a)return;
     const m=i[1].value.trim(),bu=i[2].value.trim(),ak=i[3].value.trim();
-    if(bu||ak){const e={model_id:m};if(bu)e.base_url=bu;if(ak)e.api_key=ak;mm[a]=e;}
+    const enabled=r.dataset.enabled!=='false';
+    if(bu||ak||!enabled){const e={model_id:m};if(bu)e.base_url=bu;if(ak)e.api_key=ak;if(!enabled)e.enabled=false;mm[a]=e;}
     else mm[a]=m;
   });
   return{model_map:mm,
     upstream_base_url:document.getElementById('cfg-base-url').value,
-    hostname:document.getElementById('cfg-hostname').value,
     upstream_api_key:document.getElementById('cfg-api-key').value,
+    hostname:document.getElementById('cfg-hostname').value,
     tunnel_name:document.getElementById('cfg-tunnel-name').value,
     listen_port:parseInt(document.getElementById('cfg-port').value)||8787,
     run_tunnel:document.getElementById('cfg-run-tunnel').value==='true',
-    cloudflared_bin:origCfg.cloudflared_bin||'',
-    cf_credentials_dir:origCfg.cf_credentials_dir||'',
+    cloudflared_bin:document.getElementById('cfg-cf-bin').value,
+    cf_credentials_dir:document.getElementById('cfg-cf-creds').value,
   };
 }
 function validateConfig(cfg){
   const errors=[];
   if(cfg.run_tunnel){
-    if(!cfg.hostname)errors.push('Run Tunnel enabled but Public Hostname is empty');
-    if(!cfg.tunnel_name)errors.push('Run Tunnel enabled but Tunnel Name is empty');
+    if(!cfg.hostname)errors.push(t('val_tunnel_no_host'));
+    if(!cfg.tunnel_name)errors.push(t('val_tunnel_no_name'));
   }
   const models=Object.entries(cfg.model_map);
   const hasGlobalURL=!!cfg.upstream_base_url;
   const hasGlobalKey=!!cfg.upstream_api_key;
   models.forEach(([alias,entry])=>{
     const mid=typeof entry==='string'?entry:(entry.model_id||'');
-    if(!mid)errors.push('Model "'+alias+'" has no Model ID');
+    if(!mid)errors.push(t('val_no_mid').replace('{a}',alias));
+    if(typeof entry==='object'&&entry.enabled===false)return;
     if(typeof entry==='object'){
-      if(!hasGlobalURL&&!entry.base_url)errors.push('Model "'+alias+'" needs global Base URL or its own');
-      if(!hasGlobalKey&&!entry.api_key)errors.push('Model "'+alias+'" needs global API Key or its own');
+      if(!hasGlobalURL&&!entry.base_url)errors.push(t('val_no_url').replace('{a}',alias));
+      if(!hasGlobalKey&&!entry.api_key)errors.push(t('val_no_key').replace('{a}',alias));
     }else{
-      if(!hasGlobalURL)errors.push('Model "'+alias+'" needs global Base URL');
-      if(!hasGlobalKey)errors.push('Model "'+alias+'" needs global API Key');
+      if(!hasGlobalURL)errors.push(t('val_no_url_global').replace('{a}',alias));
+      if(!hasGlobalKey)errors.push(t('val_no_key_global').replace('{a}',alias));
     }
   });
   return errors;
@@ -192,6 +306,24 @@ function showValErrors(errors){
   box.scrollIntoView({behavior:'smooth'});
   return true;
 }
+async function saveOnly(){
+  const cfg=collectConfig();
+  const errors=validateConfig(cfg);
+  if(showValErrors(errors))return;
+  try{
+  await api('/admin/api/config',{method:'POST',body:JSON.stringify(cfg),headers:{'Content-Type':'application/json'}});
+  const need=['listen_port','hostname','tunnel_name','run_tunnel','cloudflared_bin','cf_credentials_dir'];
+  const changed=need.filter(k=>String(cfg[k]??'')!==String(origCfg[k]??''));
+  if(changed.length){
+    document.body.innerHTML='<div id="overlay">'+esc(t('saved_needs_restart'))+'<br><br><button class="btn btn-danger" onclick="location.reload()">'+esc(t('restart_now'))+'</button> <button class="btn" onclick="location.reload()">'+esc(t('later'))+'</button></div>';
+  }else{
+    document.body.innerHTML='<div id="overlay">'+esc(t('saved_hot'))+'</div>';
+    setTimeout(()=>location.reload(),1200);
+  }
+  }catch(e){
+    document.body.innerHTML='<div id="overlay">'+esc(t('save_failed')+e.message)+'<br><button class="btn" onclick="location.reload()">'+esc(t('retry'))+'</button></div>';
+  }
+}
 async function saveRestart(){
   const cfg=collectConfig();
   const errors=validateConfig(cfg);
@@ -200,34 +332,34 @@ async function saveRestart(){
   try{
   await api('/admin/api/config',{method:'POST',body:JSON.stringify(cfg),headers:{'Content-Type':'application/json'}});
   await api('/admin/api/restart',{method:'POST'});
-  document.body.innerHTML='<div id="overlay">Saving &amp; restarting...<br>launchd will bring the service back in a few seconds.</div>';
+  document.body.innerHTML='<div id="overlay">'+esc(t('saving_restart'))+'</div>';
   setTimeout(()=>location.reload(),5000);
   }catch(e){
     restarting=false;
-    document.body.innerHTML='<div id="overlay">Save failed: '+esc(e.message)+'<br><button class="btn" onclick="location.reload()">Retry</button></div>';
+    document.body.innerHTML='<div id="overlay">'+esc(t('save_failed')+e.message)+'<br><button class="btn" onclick="location.reload()">'+esc(t('retry'))+'</button></div>';
   }
 }
 async function restartOnly(){
   restarting=true;clearInterval(pollTimer);
   try{
   await api('/admin/api/restart',{method:'POST'});
-  document.body.innerHTML='<div id="overlay">Restarting...</div>';
+  document.body.innerHTML='<div id="overlay">'+esc(t('restarting'))+'</div>';
   setTimeout(()=>location.reload(),5000);
   }catch(e){
     restarting=false;
-    document.body.innerHTML='<div id="overlay">Restart failed: '+esc(e.message)+'<br><button class="btn" onclick="location.reload()">Retry</button></div>';
+    document.body.innerHTML='<div id="overlay">'+esc(t('restart_failed')+e.message)+'<br><button class="btn" onclick="location.reload()">'+esc(t('retry'))+'</button></div>';
   }
 }
 function renderLogs(r){
   const e=document.getElementById('logs');
-  if(!r.length){e.textContent='No requests yet.';return;}
+  if(!r.length){e.textContent=t('no_requests');return;}
   e.innerHTML=[...r].reverse().map(x=>
     `<div class="le"><span class="t">${esc(x.time)}</span> `+
     `<span class="${x.status===200?'ok':'er'}">${x.status}</span> `+
     `${esc(x.model)} <span class="muted">${x.latency_ms}ms</span></div>`
   ).join('');
 }
-load();pollTimer=setInterval(poll,5000);
+applyI18n();load();pollTimer=setInterval(poll,5000);
 </script>
 </body>
 </html>
