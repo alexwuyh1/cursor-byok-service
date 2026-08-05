@@ -14,6 +14,9 @@ header h1{font-size:18px;font-weight:600}
 .badge{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
 .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
 .dot-ok{background:var(--success)}.dot-err{background:var(--danger)}.dot-warn{background:var(--warn)}
+.header-right{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.btn-lang{background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:500}
+.btn-lang:hover{color:var(--text);border-color:var(--accent)}
 .sig{color:var(--muted);font-size:12px;opacity:.7;margin-left:6px}
 .sig:hover{opacity:1;color:var(--accent)}
 .title-group{display:flex;align-items:baseline;gap:8px}
@@ -56,7 +59,10 @@ td code{font-family:var(--mono);font-size:12px}
     <h1 id="title"></h1>
     <a class="sig" href="https://github.com/alexwuyh1/cursor-byok-service" target="_blank" rel="noopener">by Alex</a>
   </div>
-  <div class="badges" id="badges"></div>
+  <div class="header-right">
+    <div class="badges" id="badges"></div>
+    <button id="btn-lang" class="btn-lang" onclick="toggleLang()"></button>
+  </div>
 </header>
 <section>
   <h2 id="h-models"></h2>
@@ -135,7 +141,8 @@ val_tunnel_no_host:"已启用隧道但公网域名为空",val_tunnel_no_name:"�
 val_no_mid:'模型"{a}"未填 Model ID',val_no_url_global:'模型"{a}"需要全局 Base URL',val_no_key_global:'模型"{a}"需要全局 API Key',
 val_no_url:'模型"{a}"需要全局 Base URL 或单独配置',val_no_key:'模型"{a}"需要全局 API Key 或单独配置'}
 };
-let lang=(navigator.language||'en').toLowerCase().startsWith('zh')?'zh':'en';
+let lang;
+try{lang=localStorage.getItem('byok-lang')||((navigator.language||'en').toLowerCase().startsWith('zh')?'zh':'en');}catch(e){lang='en';}
 function t(k){return I18N[lang][k]??I18N.en[k]??k;}
 function applyI18n(){
 document.documentElement.lang=lang;
@@ -148,7 +155,21 @@ document.getElementById('cfg-hostname').placeholder='cursor.domain.com';
 document.getElementById('cfg-tunnel-name').placeholder='my-tunnel';
 document.getElementById('cfg-cf-bin').placeholder='/opt/homebrew/bin/cloudflared';
 document.getElementById('cfg-cf-creds').placeholder='~/.cloudflared';
+document.getElementById('btn-lang').textContent=lang==='zh'?'EN':'中';
 }
+
+let lastStatus=null,lastCfg=null;
+function rerenderI18n(){
+applyI18n();
+if(lastStatus){renderBadges(lastStatus);renderLogs(lastStatus.requests||[]);}
+document.querySelectorAll('.model-row').forEach(r=>{
+const i=r.querySelectorAll('input');
+i[0].placeholder=t('alias');i[1].placeholder=t('model_id');i[2].placeholder=t('base_url_ph');i[3].placeholder=t('api_key_ph');
+applyModelToggle(r);
+const d=r.querySelector('.model-actions .btn-danger');if(d)d.textContent=t('del');
+});
+}
+function toggleLang(){lang=lang==='zh'?'en':'zh';try{localStorage.setItem('byok-lang',lang);}catch(e){}rerenderI18n();}
 
 let origCfg={};
 let restarting=false;
@@ -158,6 +179,7 @@ async function load(){
   if(restarting)return;
   try{
   const[s,c]=await Promise.all([api('/admin/api/status'),api('/admin/api/config')]);
+  lastStatus=s;lastCfg=c;
   renderBadges(s);renderConfig(c);renderModels(c.model_map||{});renderLogs(s.requests||[]);
   }catch(e){/* service unavailable, retry next tick */}
 }
@@ -165,6 +187,7 @@ async function poll(){
   if(restarting)return;
   try{
   const s=await api('/admin/api/status');
+  lastStatus=s;
   renderBadges(s);renderLogs(s.requests||[]);
   }catch(e){/* service unavailable, retry next tick */}
 }
@@ -359,7 +382,7 @@ function renderLogs(r){
     `${esc(x.model)} <span class="muted">${x.latency_ms}ms</span></div>`
   ).join('');
 }
-applyI18n();load();pollTimer=setInterval(poll,5000);
+rerenderI18n();load();pollTimer=setInterval(poll,5000);
 </script>
 </body>
 </html>
